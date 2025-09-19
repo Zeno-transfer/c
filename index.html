@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sendly — Simple File Send</title>
+  <title>Zeno — File Send</title>
   <link rel="icon" href="data:," />
   <style>
     :root{
@@ -49,7 +49,7 @@
 
     .controls{background:var(--card); border-radius:var(--radius); border:1px solid rgba(255,255,255,.08); padding:18px; display:grid; gap:14px}
     label{font-size:13px; color:var(--muted)}
-    select, input[type="text"], input[type="email"]{
+    select, input[type="text"]{
       width:100%; padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:#12151b; color:var(--text); outline:none
     }
     .btn{
@@ -73,8 +73,6 @@
     .linkbox input{flex:1}
 
     .muted{color:var(--muted)}
-    .error{color:var(--danger)}
-    .success{color:var(--ok)}
     footer{margin-top:24px; text-align:center; color:var(--muted); font-size:12px}
     a{color:#b8c7ff}
   </style>
@@ -106,7 +104,7 @@
         <!-- RIGHT: Controls -->
         <div class="controls">
           <div>
-            <label for="expiry">Link expires</label>
+            <label for="expiry">Link expires (not enforced in Firebase demo)</label>
             <select id="expiry">
               <option value="1">1 day</option>
               <option value="7" selected>7 days</option>
@@ -121,8 +119,7 @@
 
           <div>
             <button id="btn-upload" class="btn primary" disabled>
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
-              Create link
+              Upload & Create link
             </button>
             <div class="progress" aria-hidden="true" style="margin-top:10px"><div class="bar" id="bar"></div></div>
             <div id="status" class="muted" style="margin-top:8px"></div>
@@ -137,231 +134,125 @@
           </div>
 
           <div class="muted" style="font-size:12px">
-            This is a front‑end demo. Files are stored locally in your browser using IndexedDB and cleaned up on expiry. To make links work across devices, plug in a real backend (S3, etc.).
+            Files are stored in Firebase Storage. Share the generated link to access them.
           </div>
         </div>
       </div>
     </div>
 
-    <!-- DOWNLOAD VIEW -->
-    <div id="view-download" class="card" style="display:none">
-      <div id="dl-head" style="margin-bottom:10px"></div>
-      <div id="dl-list" class="list"></div>
-      <div id="dl-actions" style="margin-top:14px; display:flex; gap:10px">
-        <button id="btn-dl-all" class="btn primary">Download all</button>
-        <button id="btn-delete" class="btn ghost">Delete transfer</button>
-      </div>
-      <div id="dl-status" class="muted" style="margin-top:8px"></div>
-    </div>
-
     <footer>
-      Built as a learning prototype. © <span id="year"></span>
+      Built with Firebase Storage. © <span id="year"></span>
     </footer>
   </div>
 
-  <script>
-  // ===== Utilities =====
-  const fmtBytes = (bytes) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024; const sizes = ['B','KB','MB','GB','TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-  const byId = (id) => document.getElementById(id);
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-app.js";
+    import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.5.0/firebase-storage.js";
 
-  // ===== IndexedDB Minimal Wrapper =====
-  const DB_NAME = 'litetransfer';
-  const DB_VERSION = 1;
-  const openDB = () => new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      const t = db.createObjectStore('transfers', { keyPath: 'id' });
-      t.createIndex('expiresAt', 'expiresAt');
-      const f = db.createObjectStore('files', { keyPath: 'id' });
-      f.createIndex('transferId', 'transferId');
+    const firebaseConfig = {
+      apiKey: "AIzaSyBwZ9P83NmTVRK02MO6bGClQwPxgLFQ87o",
+      authDomain: "zeno-265a3.firebaseapp.com",
+      projectId: "zeno-265a3",
+      storageBucket: "zeno-265a3.firebasestorage.app",
+      messagingSenderId: "346625170587",
+      appId: "1:346625170587:web:5ede0271211dc548723a3e"
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-  const tx = (db, store, mode='readonly') => db.transaction(store, mode).objectStore(store);
 
-  async function put(store, value){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store, 'readwrite').put(value); r.onsuccess=()=>res(value); r.onerror=()=>rej(r.error) }) }
-  async function get(store, key){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error) }) }
-  async function del(store, key){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store, 'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error) }) }
-  async function listByIndex(store, index, query){ const db = await openDB(); return new Promise((res, rej)=>{ const os = tx(db, store).index(index).openCursor(query); const out=[]; os.onsuccess = (e)=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out) }; os.onerror=()=>rej(os.error) }) }
+    const app = initializeApp(firebaseConfig);
+    const storage = getStorage(app);
 
-  // Cleanup expired transfers at startup
-  async function cleanup(){
-    const expired = await listByIndex('transfers','expiresAt', IDBKeyRange.upperBound(Date.now()));
-    for(const t of expired){
-      // delete files
-      const files = await listByIndex('files','transferId', IDBKeyRange.only(t.id));
-      for(const f of files){ await del('files', f.id) }
-      await del('transfers', t.id);
-    }
-  }
+    // ===== Helpers =====
+    const fmtBytes = (bytes) => {
+      if (bytes === 0) return '0 B';
+      const k = 1024; const sizes = ['B','KB','MB','GB','TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+    const byId = (id) => document.getElementById(id);
 
-  // ===== State =====
-  const state = { files: [], limitBytes: 2 * 1024 * 1024 * 1024 /* 2 GB soft UI limit */ };
+    // ===== State =====
+    const state = { files: [], limitBytes: 2 * 1024 * 1024 * 1024 };
 
-  // ===== UI Elements =====
-  const drop = byId('drop');
-  const fileInput = byId('file-input');
-  const fileList = byId('file-list');
-  const btnUpload = byId('btn-upload');
-  const bar = byId('bar');
-  const status = byId('status');
-  const result = byId('result');
-  const shareLink = byId('share-link');
-  const btnCopy = byId('btn-copy');
-  const limitInfo = byId('limitInfo');
+    // ===== UI Elements =====
+    const drop = byId('drop');
+    const fileInput = byId('file-input');
+    const fileList = byId('file-list');
+    const btnUpload = byId('btn-upload');
+    const bar = byId('bar');
+    const status = byId('status');
+    const result = byId('result');
+    const shareLink = byId('share-link');
+    const btnCopy = byId('btn-copy');
+    const limitInfo = byId('limitInfo');
 
-  const viewUpload = byId('view-upload');
-  const viewDownload = byId('view-download');
-  const dlHead = byId('dl-head');
-  const dlList = byId('dl-list');
-  const dlStatus = byId('dl-status');
-  const btnDlAll = byId('btn-dl-all');
-  const btnDelete = byId('btn-delete');
-
-  // ===== File selection & listing =====
-  function updateList(){
-    fileList.innerHTML = '';
-    let total = 0;
-    state.files.forEach(f => total += f.size);
-    if(state.files.length === 0){
-      btnUpload.disabled = true;
-      status.textContent = '';
-      return;
-    }
-    btnUpload.disabled = false;
-
-    for(const f of state.files){
-      const row = document.createElement('div'); row.className='item';
-      row.innerHTML = `<div class="name">${f.name}</div><div class="meta">${fmtBytes(f.size)}</div><button class="btn ghost btn-remove">Remove</button>`;
-      row.querySelector('.btn-remove').onclick = () => { state.files = state.files.filter(x => x !== f); updateList(); };
-      fileList.appendChild(row);
-    }
-    const totalRow = document.createElement('div'); totalRow.className='item';
-    totalRow.innerHTML = `<div class="name"><strong>${state.files.length}</strong> file(s) selected</div><div class="meta">Total ${fmtBytes(total)}</div>`;
-    fileList.appendChild(totalRow);
-
-    limitInfo.textContent = `Soft limit: ${fmtBytes(state.limitBytes)} (browser storage quotas may be lower).`;
-  }
-
-  drop.addEventListener('click', () => fileInput.click());
-  drop.addEventListener('keydown', (e) => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); } });
-  drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('dragover') });
-  drop.addEventListener('dragleave', ()=> drop.classList.remove('dragover'));
-  drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.classList.remove('dragover');
-    const files = [...e.dataTransfer.files]; state.files.push(...files); updateList(); });
-  fileInput.addEventListener('change', ()=>{ state.files.push(...fileInput.files); fileInput.value=''; updateList(); });
-
-  // ===== Create link ("upload" to IndexedDB) =====
-  async function createTransfer(){
-    const days = parseInt(document.getElementById('expiry').value, 10);
-    const note = document.getElementById('note').value.trim();
-    const id = crypto.randomUUID();
-    const expiresAt = Date.now() + days*24*60*60*1000;
-
-    // Simulate progressive upload while saving files to DB
-    let uploaded = 0; let total = state.files.reduce((a,f)=>a+f.size, 0) || 1;
-    bar.style.width = '0%'; status.textContent = 'Uploading…'; btnUpload.disabled = true;
-
-    for(const file of state.files){
-      // store the File directly as Blob
-      const fileRec = { id: crypto.randomUUID(), transferId: id, name: file.name, type: file.type, size: file.size, blob: file };
-      await put('files', fileRec);
-      uploaded += file.size;
-      const pct = Math.min(99, Math.floor(uploaded/total*100));
-      bar.style.width = pct+'%';
-    }
-
-    const transfer = { id, note, createdAt: Date.now(), expiresAt, fileCount: state.files.length, totalSize: total };
-    await put('transfers', transfer);
-
-    bar.style.width = '100%'; status.textContent = 'Done!';
-
-    const link = location.origin + location.pathname + '#d=' + id;
-    result.classList.add('show');
-    shareLink.value = link;
-
-    // reset selection
-    state.files = []; updateList(); btnUpload.disabled = false;
-  }
-
-  btnUpload.addEventListener('click', createTransfer);
-  btnCopy.addEventListener('click', async ()=>{
-    try{ await navigator.clipboard.writeText(shareLink.value); btnCopy.textContent='Copied'; setTimeout(()=>btnCopy.textContent='Copy', 1200) }catch{ /* ignore */ }
-  });
-
-  // ===== Download view logic =====
-  async function loadDownload(id){
-    viewUpload.style.display = 'none';
-    viewDownload.style.display = 'block';
-
-    const t = await get('transfers', id);
-    if(!t){ dlHead.innerHTML = '<h2>Transfer not found</h2>'; dlStatus.textContent='It may have expired or been deleted.'; byId('dl-actions').style.display='none'; return; }
-    if(Date.now() > t.expiresAt){ dlHead.innerHTML = '<h2>Link expired</h2>'; dlStatus.textContent='The sender set an expiry date for this transfer.'; byId('dl-actions').style.display='none'; return; }
-
-    const when = new Date(t.createdAt).toLocaleString();
-    const until = new Date(t.expiresAt).toLocaleString();
-    dlHead.innerHTML = `<h2>${t.fileCount} file(s) • ${fmtBytes(t.totalSize)}</h2><div class="muted">Sent ${when} • Expires ${until}</div>${t.note?`<div style="margin-top:8px">“${t.note.replace(/</g,'&lt;')}”</div>`:''}`;
-
-    // list files
-    dlList.innerHTML = '';
-    const files = await listByIndex('files','transferId', IDBKeyRange.only(id));
-    for(const f of files){
-      const row = document.createElement('div'); row.className='item';
-      const btn = document.createElement('button'); btn.className='btn ghost'; btn.textContent='Download';
-      btn.onclick = async ()=>{
-        const blob = f.blob; // stored Blob
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href=url; a.download=f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
-      };
-      row.innerHTML = `<div class="name">${f.name}</div><div class="meta">${fmtBytes(f.size)}</div>`;
-      row.appendChild(btn);
-      dlList.appendChild(row);
-    }
-
-    btnDlAll.onclick = async ()=>{
-      // Without a zip library, trigger downloads one by one
-      dlStatus.textContent = 'Downloading files…';
-      for(const f of files){
-        const url = URL.createObjectURL(f.blob);
-        const a = document.createElement('a'); a.href=url; a.download=f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1200);
+    // ===== File selection =====
+    function updateList(){
+      fileList.innerHTML = '';
+      let total = 0;
+      state.files.forEach(f => total += f.size);
+      if(state.files.length === 0){
+        btnUpload.disabled = true;
+        status.textContent = '';
+        return;
       }
-      dlStatus.textContent = 'Done.';
-    };
+      btnUpload.disabled = false;
 
-    btnDelete.onclick = async ()=>{
-      if(!confirm('Delete this transfer now?')) return;
-      for(const f of files){ await del('files', f.id); }
-      await del('transfers', id);
-      dlStatus.textContent = 'Transfer deleted.';
-      byId('dl-actions').style.display='none';
-    };
-  }
+      for(const f of state.files){
+        const row = document.createElement('div'); row.className='item';
+        row.innerHTML = `<div class="name">${f.name}</div><div class="meta">${fmtBytes(f.size)}</div><button class="btn ghost btn-remove">Remove</button>`;
+        row.querySelector('.btn-remove').onclick = () => { state.files = state.files.filter(x => x !== f); updateList(); };
+        fileList.appendChild(row);
+      }
+      const totalRow = document.createElement('div'); totalRow.className='item';
+      totalRow.innerHTML = `<div class="name"><strong>${state.files.length}</strong> file(s) selected</div><div class="meta">Total ${fmtBytes(total)}</div>`;
+      fileList.appendChild(totalRow);
 
-  // ===== Router (upload vs download view) =====
-  function route(){
-    const hash = location.hash || '';
-    if(hash.startsWith('#d=')){
-      loadDownload(hash.slice(3));
-    } else {
-      viewUpload.style.display = 'block';
-      viewDownload.style.display = 'none';
+      limitInfo.textContent = `Soft limit: ${fmtBytes(state.limitBytes)} (Firebase free tier: 5 GB).`;
     }
-  }
 
-  // ===== Init =====
-  (async function init(){
-    await cleanup();
-    route();
-    window.addEventListener('hashchange', route);
+    drop.addEventListener('click', () => fileInput.click());
+    drop.addEventListener('keydown', (e) => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); } });
+    drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('dragover') });
+    drop.addEventListener('dragleave', ()=> drop.classList.remove('dragover'));
+    drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.classList.remove('dragover');
+      const files = [...e.dataTransfer.files]; state.files.push(...files); updateList(); });
+    fileInput.addEventListener('change', ()=>{ state.files.push(...fileInput.files); fileInput.value=''; updateList(); });
+
+    // ===== Upload to Firebase =====
+    async function createTransfer(){
+      bar.style.width = '0%'; status.textContent = 'Uploading…'; btnUpload.disabled = true;
+
+      let uploaded = 0; let total = state.files.reduce((a,f)=>a+f.size, 0) || 1;
+      const urls = [];
+
+      for(const file of state.files){
+        const fileRef = ref(storage, 'uploads/' + Date.now() + '-' + file.name);
+        await uploadBytes(fileRef, file);
+        const url = await getDownloadURL(fileRef);
+        urls.push(url);
+
+        uploaded += file.size;
+        const pct = Math.min(99, Math.floor(uploaded/total*100));
+        bar.style.width = pct+'%';
+      }
+
+      bar.style.width = '100%'; status.textContent = 'Done!';
+
+      // If one file → single link, else show first file + JSON of all links
+      shareLink.value = urls.length === 1 ? urls[0] : JSON.stringify(urls);
+      result.classList.add('show');
+
+      state.files = []; updateList(); btnUpload.disabled = false;
+    }
+
+    btnUpload.addEventListener('click', createTransfer);
+    btnCopy.addEventListener('click', async ()=>{
+      try{ await navigator.clipboard.writeText(shareLink.value); btnCopy.textContent='Copied'; setTimeout(()=>btnCopy.textContent='Copy', 1200) }catch{}
+    });
+
     byId('year').textContent = new Date().getFullYear();
-  })();
   </script>
 </body>
 </html>
+
