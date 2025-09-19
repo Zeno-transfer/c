@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sendly — Simple File Send</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root{
+      --bg: #0f1115;
+      --card: #181b22;
+      --muted: #a6adbb;
+      --text: #e6e9ef;
+      --accent: #7c5cff;
+      --accent-2:#59e1ff;
+      --danger:#ff5c7a;
+      --ok:#38d39f;
+      --radius: 20px;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, Noto Sans, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(1200px 600px at 0% 0%, rgba(124,92,255,.15), transparent 40%), radial-gradient(900px 500px at 100% 0%, rgba(89,225,255,.12), transparent 45%), var(--bg);
+      color:var(--text); display:flex; align-items:center; justify-content:center; padding:32px;
+    }
+    .wrap{width:min(980px, 100%);}
+    header{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px}
+    .brand{display:flex; align-items:center; gap:12px}
+    .brand .dot{width:14px; height:14px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent-2)); box-shadow:0 0 18px rgba(124,92,255,.7)}
+    .brand h1{font-size:18px; margin:0; letter-spacing:.3px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02)); border:1px solid rgba(255,255,255,.08); box-shadow:var(--shadow); border-radius:var(--radius); padding:20px}
+
+    .grid{display:grid; grid-template-columns: 1.2fr .8fr; gap:18px}
+    @media (max-width: 900px){ .grid{grid-template-columns:1fr} }
+
+    .drop{
+      background:var(--card);
+      border-radius:var(--radius);
+      border:1.5px dashed rgba(255,255,255,.18);
+      padding:28px; text-align:center; transition:.25s ease; cursor:pointer; position:relative; overflow:hidden;
+      min-height:260px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px
+    }
+    .drop.dragover{ border-color:var(--accent); box-shadow:0 0 0 4px rgba(124,92,255,.18) inset }
+    .drop input{ display:none }
+    .drop .big{font-size:18px; font-weight:600}
+    .drop .small{color:var(--muted)}
+
+    .controls{background:var(--card); border-radius:var(--radius); border:1px solid rgba(255,255,255,.08); padding:18px; display:grid; gap:14px}
+    label{font-size:13px; color:var(--muted)}
+    select, input[type="text"], input[type="email"]{
+      width:100%; padding:12px 14px; border-radius:12px; border:1px solid rgba(255,255,255,.1); background:#12151b; color:var(--text); outline:none
+    }
+    .btn{
+      display:inline-flex; align-items:center; justify-content:center; gap:10px; padding:12px 16px; border:none; color:white; border-radius:14px; cursor:pointer; transition:.25s ease; font-weight:600
+    }
+    .btn.primary{ background:linear-gradient(135deg,var(--accent),var(--accent-2)) }
+    .btn.ghost{ background:transparent; border:1px solid rgba(255,255,255,.16) }
+    .btn:disabled{ opacity:.65; cursor:not-allowed }
+
+    .list{margin-top:14px; display:grid; gap:10px; max-height:210px; overflow:auto; padding-right:2px}
+    .item{display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.04); padding:10px 12px; border:1px solid rgba(255,255,255,.08); border-radius:12px}
+    .item .name{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .item .meta{color:var(--muted); font-size:12px}
+
+    .progress{height:10px; width:100%; background:rgba(255,255,255,.06); border-radius:999px; overflow:hidden; border:1px solid rgba(255,255,255,.08)}
+    .bar{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition: width .2s ease}
+
+    .result{display:none; margin-top:14px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; gap:10px}
+    .result.show{display:grid}
+    .linkbox{display:flex; gap:10px}
+    .linkbox input{flex:1}
+
+    .muted{color:var(--muted)}
+    .error{color:var(--danger)}
+    .success{color:var(--ok)}
+    footer{margin-top:24px; text-align:center; color:var(--muted); font-size:12px}
+    a{color:#b8c7ff}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="dot" aria-hidden="true"></div>
+        <h1>Zeno</h1>
+      </div>
+      <div class="muted">No account. Just send files.</div>
+    </header>
+
+    <div id="view-upload" class="card">
+      <div class="grid">
+        <!-- LEFT: Dropzone -->
+        <div>
+          <div id="drop" class="drop" tabindex="0" role="button" aria-label="Upload files by clicking or dropping here">
+            <input id="file-input" type="file" multiple />
+            <div class="big">Drag & drop files here</div>
+            <div class="small">or click to browse</div>
+            <div id="limitInfo" class="small muted"></div>
+          </div>
+
+          <div class="list" id="file-list" aria-live="polite"></div>
+        </div>
+
+        <!-- RIGHT: Controls -->
+        <div class="controls">
+          <div>
+            <label for="expiry">Link expires</label>
+            <select id="expiry">
+              <option value="1">1 day</option>
+              <option value="7" selected>7 days</option>
+              <option value="30">30 days</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="note">Message (optional)</label>
+            <input id="note" type="text" placeholder="A little note for the recipient" />
+          </div>
+
+          <div>
+            <button id="btn-upload" class="btn primary" disabled>
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+              Create link
+            </button>
+            <div class="progress" aria-hidden="true" style="margin-top:10px"><div class="bar" id="bar"></div></div>
+            <div id="status" class="muted" style="margin-top:8px"></div>
+          </div>
+
+          <div id="result" class="result">
+            <div class="muted">Your share link</div>
+            <div class="linkbox">
+              <input id="share-link" readonly />
+              <button id="btn-copy" class="btn ghost">Copy</button>
+            </div>
+          </div>
+
+          <div class="muted" style="font-size:12px">
+            This is a front‑end demo. Files are stored locally in your browser using IndexedDB and cleaned up on expiry. To make links work across devices, plug in a real backend (S3, etc.).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOWNLOAD VIEW -->
+    <div id="view-download" class="card" style="display:none">
+      <div id="dl-head" style="margin-bottom:10px"></div>
+      <div id="dl-list" class="list"></div>
+      <div id="dl-actions" style="margin-top:14px; display:flex; gap:10px">
+        <button id="btn-dl-all" class="btn primary">Download all</button>
+        <button id="btn-delete" class="btn ghost">Delete transfer</button>
+      </div>
+      <div id="dl-status" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <footer>
+      Built as a learning prototype. © <span id="year"></span>
+    </footer>
+  </div>
+
+  <script>
+  // ===== Utilities =====
+  const fmtBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024; const sizes = ['B','KB','MB','GB','TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+  const byId = (id) => document.getElementById(id);
+
+  // ===== IndexedDB Minimal Wrapper =====
+  const DB_NAME = 'litetransfer';
+  const DB_VERSION = 1;
+  const openDB = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      const t = db.createObjectStore('transfers', { keyPath: 'id' });
+      t.createIndex('expiresAt', 'expiresAt');
+      const f = db.createObjectStore('files', { keyPath: 'id' });
+      f.createIndex('transferId', 'transferId');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const tx = (db, store, mode='readonly') => db.transaction(store, mode).objectStore(store);
+
+  async function put(store, value){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store, 'readwrite').put(value); r.onsuccess=()=>res(value); r.onerror=()=>rej(r.error) }) }
+  async function get(store, key){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error) }) }
+  async function del(store, key){ const db = await openDB(); return new Promise((res, rej)=>{ const r = tx(db, store, 'readwrite').delete(key); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error) }) }
+  async function listByIndex(store, index, query){ const db = await openDB(); return new Promise((res, rej)=>{ const os = tx(db, store).index(index).openCursor(query); const out=[]; os.onsuccess = (e)=>{ const c=e.target.result; if(c){ out.push(c.value); c.continue(); } else res(out) }; os.onerror=()=>rej(os.error) }) }
+
+  // Cleanup expired transfers at startup
+  async function cleanup(){
+    const expired = await listByIndex('transfers','expiresAt', IDBKeyRange.upperBound(Date.now()));
+    for(const t of expired){
+      // delete files
+      const files = await listByIndex('files','transferId', IDBKeyRange.only(t.id));
+      for(const f of files){ await del('files', f.id) }
+      await del('transfers', t.id);
+    }
+  }
+
+  // ===== State =====
+  const state = { files: [], limitBytes: 2 * 1024 * 1024 * 1024 /* 2 GB soft UI limit */ };
+
+  // ===== UI Elements =====
+  const drop = byId('drop');
+  const fileInput = byId('file-input');
+  const fileList = byId('file-list');
+  const btnUpload = byId('btn-upload');
+  const bar = byId('bar');
+  const status = byId('status');
+  const result = byId('result');
+  const shareLink = byId('share-link');
+  const btnCopy = byId('btn-copy');
+  const limitInfo = byId('limitInfo');
+
+  const viewUpload = byId('view-upload');
+  const viewDownload = byId('view-download');
+  const dlHead = byId('dl-head');
+  const dlList = byId('dl-list');
+  const dlStatus = byId('dl-status');
+  const btnDlAll = byId('btn-dl-all');
+  const btnDelete = byId('btn-delete');
+
+  // ===== File selection & listing =====
+  function updateList(){
+    fileList.innerHTML = '';
+    let total = 0;
+    state.files.forEach(f => total += f.size);
+    if(state.files.length === 0){
+      btnUpload.disabled = true;
+      status.textContent = '';
+      return;
+    }
+    btnUpload.disabled = false;
+
+    for(const f of state.files){
+      const row = document.createElement('div'); row.className='item';
+      row.innerHTML = `<div class="name">${f.name}</div><div class="meta">${fmtBytes(f.size)}</div><button class="btn ghost btn-remove">Remove</button>`;
+      row.querySelector('.btn-remove').onclick = () => { state.files = state.files.filter(x => x !== f); updateList(); };
+      fileList.appendChild(row);
+    }
+    const totalRow = document.createElement('div'); totalRow.className='item';
+    totalRow.innerHTML = `<div class="name"><strong>${state.files.length}</strong> file(s) selected</div><div class="meta">Total ${fmtBytes(total)}</div>`;
+    fileList.appendChild(totalRow);
+
+    limitInfo.textContent = `Soft limit: ${fmtBytes(state.limitBytes)} (browser storage quotas may be lower).`;
+  }
+
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('keydown', (e) => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); } });
+  drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('dragover') });
+  drop.addEventListener('dragleave', ()=> drop.classList.remove('dragover'));
+  drop.addEventListener('drop', (e)=>{ e.preventDefault(); drop.classList.remove('dragover');
+    const files = [...e.dataTransfer.files]; state.files.push(...files); updateList(); });
+  fileInput.addEventListener('change', ()=>{ state.files.push(...fileInput.files); fileInput.value=''; updateList(); });
+
+  // ===== Create link ("upload" to IndexedDB) =====
+  async function createTransfer(){
+    const days = parseInt(document.getElementById('expiry').value, 10);
+    const note = document.getElementById('note').value.trim();
+    const id = crypto.randomUUID();
+    const expiresAt = Date.now() + days*24*60*60*1000;
+
+    // Simulate progressive upload while saving files to DB
+    let uploaded = 0; let total = state.files.reduce((a,f)=>a+f.size, 0) || 1;
+    bar.style.width = '0%'; status.textContent = 'Uploading…'; btnUpload.disabled = true;
+
+    for(const file of state.files){
+      // store the File directly as Blob
+      const fileRec = { id: crypto.randomUUID(), transferId: id, name: file.name, type: file.type, size: file.size, blob: file };
+      await put('files', fileRec);
+      uploaded += file.size;
+      const pct = Math.min(99, Math.floor(uploaded/total*100));
+      bar.style.width = pct+'%';
+    }
+
+    const transfer = { id, note, createdAt: Date.now(), expiresAt, fileCount: state.files.length, totalSize: total };
+    await put('transfers', transfer);
+
+    bar.style.width = '100%'; status.textContent = 'Done!';
+
+    const link = location.origin + location.pathname + '#d=' + id;
+    result.classList.add('show');
+    shareLink.value = link;
+
+    // reset selection
+    state.files = []; updateList(); btnUpload.disabled = false;
+  }
+
+  btnUpload.addEventListener('click', createTransfer);
+  btnCopy.addEventListener('click', async ()=>{
+    try{ await navigator.clipboard.writeText(shareLink.value); btnCopy.textContent='Copied'; setTimeout(()=>btnCopy.textContent='Copy', 1200) }catch{ /* ignore */ }
+  });
+
+  // ===== Download view logic =====
+  async function loadDownload(id){
+    viewUpload.style.display = 'none';
+    viewDownload.style.display = 'block';
+
+    const t = await get('transfers', id);
+    if(!t){ dlHead.innerHTML = '<h2>Transfer not found</h2>'; dlStatus.textContent='It may have expired or been deleted.'; byId('dl-actions').style.display='none'; return; }
+    if(Date.now() > t.expiresAt){ dlHead.innerHTML = '<h2>Link expired</h2>'; dlStatus.textContent='The sender set an expiry date for this transfer.'; byId('dl-actions').style.display='none'; return; }
+
+    const when = new Date(t.createdAt).toLocaleString();
+    const until = new Date(t.expiresAt).toLocaleString();
+    dlHead.innerHTML = `<h2>${t.fileCount} file(s) • ${fmtBytes(t.totalSize)}</h2><div class="muted">Sent ${when} • Expires ${until}</div>${t.note?`<div style="margin-top:8px">“${t.note.replace(/</g,'&lt;')}”</div>`:''}`;
+
+    // list files
+    dlList.innerHTML = '';
+    const files = await listByIndex('files','transferId', IDBKeyRange.only(id));
+    for(const f of files){
+      const row = document.createElement('div'); row.className='item';
+      const btn = document.createElement('button'); btn.className='btn ghost'; btn.textContent='Download';
+      btn.onclick = async ()=>{
+        const blob = f.blob; // stored Blob
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download=f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1000);
+      };
+      row.innerHTML = `<div class="name">${f.name}</div><div class="meta">${fmtBytes(f.size)}</div>`;
+      row.appendChild(btn);
+      dlList.appendChild(row);
+    }
+
+    btnDlAll.onclick = async ()=>{
+      // Without a zip library, trigger downloads one by one
+      dlStatus.textContent = 'Downloading files…';
+      for(const f of files){
+        const url = URL.createObjectURL(f.blob);
+        const a = document.createElement('a'); a.href=url; a.download=f.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url), 1200);
+      }
+      dlStatus.textContent = 'Done.';
+    };
+
+    btnDelete.onclick = async ()=>{
+      if(!confirm('Delete this transfer now?')) return;
+      for(const f of files){ await del('files', f.id); }
+      await del('transfers', id);
+      dlStatus.textContent = 'Transfer deleted.';
+      byId('dl-actions').style.display='none';
+    };
+  }
+
+  // ===== Router (upload vs download view) =====
+  function route(){
+    const hash = location.hash || '';
+    if(hash.startsWith('#d=')){
+      loadDownload(hash.slice(3));
+    } else {
+      viewUpload.style.display = 'block';
+      viewDownload.style.display = 'none';
+    }
+  }
+
+  // ===== Init =====
+  (async function init(){
+    await cleanup();
+    route();
+    window.addEventListener('hashchange', route);
+    byId('year').textContent = new Date().getFullYear();
+  })();
+  </script>
+</body>
+</html>
